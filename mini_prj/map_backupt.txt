@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bird Migration Prediction</title>
+
+    <!-- Google Fonts for modern look -->
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- Bootstrap 4 -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+
+    <!-- Leaflet.js -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: #f4f6f8;
+            margin: 0;
+            padding: 0;
+        }
+
+        .header {
+            background: #00796b;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+            font-weight: 600;
+            font-size: 1.8rem;
+            letter-spacing: 1px;
+        }
+
+        .main-container {
+            display: flex;
+            flex-wrap: wrap;
+            margin: 20px;
+            gap: 20px;
+        }
+
+        .map-container {
+            flex: 2;
+            min-width: 300px;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+
+        .info-panel {
+            flex: 1;
+            min-width: 280px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+
+        #map {
+            height: 550px;
+            width: 100%;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        #loading {
+            display: none;
+            text-align: center;
+            margin-top: 15px;
+            font-weight: bold;
+            color: #00796b;
+        }
+
+        .form-group label {
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background: #00796b;
+            border: none;
+        }
+        .btn-primary:hover {
+            background: #005f56;
+        }
+
+        .bird-image {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+
+        .migration-reason {
+            margin-top: 20px;
+            font-size: 1rem;
+            color: #555;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="header">
+    🐦 Bird Migration Prediction
+</div>
+
+<div class="main-container">
+    <div class="map-container">
+        <div class="form-group">
+            <label for="birdId">Enter Bird ID:</label>
+            <input type="text" id="birdId" class="form-control" placeholder="e.g., BIRD123">
+        </div>
+        <button id="generateMapBtn" class="btn btn-primary mb-3">Generate Map</button>
+
+        <div id="loading">Loading map data... Please wait 🐦</div>
+        <div id="map"></div>
+    </div>
+
+    <div class="info-panel">
+        <h4></h4>
+        <img src="https://plus.unsplash.com/premium_photo-1661945245687-8f23c0ce15ba?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8b3NwcmV5fGVufDB8fDB8fHww" 
+             alt="Bird Image" class="bird-image" id="birdImage">
+        
+        <div class="migration-reason" id="migrationReason">
+            Birds migrate primarily to find optimal breeding grounds and favorable climates. They travel long distances to ensure food availability and safe nesting sites, often triggered by changing seasons.
+        </div>
+    </div>
+</div>
+
+<script>
+    var map;
+    var actualLine, predictedLine, futureLine;
+
+    function getQueryParam(param) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(param);
+    }
+
+    $(document).ready(function() {
+        const birdIdFromUrl = getQueryParam('bird_id');
+        if (birdIdFromUrl) {
+            $('#birdId').val(birdIdFromUrl);
+            $('#generateMapBtn').click();
+        }
+
+        $('#generateMapBtn').click(function() {
+            var birdId = $('#birdId').val();
+            if (birdId) {
+                $('#loading').show();
+
+                $.ajax({
+                    url: 'http://127.0.0.1:5000/generate_map',
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ bird_id: birdId }),
+                    success: function(data) {
+                        console.log('Data received:', data);
+                        displayMap(data);
+                        $('#loading').hide();
+                        updateBirdInfo(birdId);
+                    },
+                    error: function(error) {
+                        console.log('Error:', error);
+                        alert('Error generating map. Please try again.');
+                        $('#loading').hide();
+                    }
+                });
+            } else {
+                alert('Please enter a valid Bird ID.');
+            }
+        });
+
+        function displayMap(data) {
+            if (!map) {
+                map = L.map('map').setView([20, 77], 5);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(map);
+            } else {
+                map.eachLayer(function (layer) {
+                    if (layer instanceof L.Polyline || layer instanceof L.Marker) {
+                        map.removeLayer(layer);
+                    }
+                });
+            }
+
+            const actualCoords = data.actual.map(point => [point.lat, point.lon]);
+            const predictedCoords = data.predicted.map(point => [point.lat, point.lon]);
+            const futureCoords = data.future.map(point => [point.lat, point.lon]);
+
+            actualLine = L.polyline(actualCoords, { color: 'red' }).addTo(map).bindPopup('Actual Path');
+            predictedLine = L.polyline(predictedCoords, { color: 'blue', dashArray: '5,10' }).addTo(map).bindPopup('Predicted Path');
+            futureLine = L.polyline(futureCoords, { color: 'green', dashArray: '5,5' }).addTo(map).bindPopup('Future Path');
+
+            if (actualCoords.length) {
+                L.marker(actualCoords[0]).addTo(map).bindPopup('Start Position');
+                L.marker(actualCoords[actualCoords.length-1]).addTo(map).bindPopup('Last Actual Position');
+            }
+            if (futureCoords.length) {
+                L.marker(futureCoords[futureCoords.length-1]).addTo(map).bindPopup('Future Destination');
+            }
+
+            var allPoints = actualCoords.concat(predictedCoords).concat(futureCoords);
+            map.fitBounds(L.polyline(allPoints).getBounds());
+        }
+
+        function updateBirdInfo(birdId) {
+            // Here you can add logic to dynamically update image/reason based on birdId
+            // For now, let's keep it static
+            $('#migrationReason').text('This bird migrates to find warmer regions and abundant food resources, crucial for survival during harsh seasons.');
+            $('#birdImage').attr('src', 'https://plus.unsplash.com/premium_photo-1661945245687-8f23c0ce15ba?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8b3NwcmV5fGVufDB8fDB8fHww');
+        }
+    });
+</script>
+
+</body>
+</html>
+
+
+
+--------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Bird Migration Prediction</title>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+
+  <!-- Bootstrap -->
+  <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+  <!-- jQuery -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+
+  <style>
+    body {
+      font-family: 'Poppins', sans-serif;
+      background: #f4f6f8;
+      margin: 0;
+      padding: 0;
+    }
+
+    .header {
+      background: #01056e;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+      font-weight: 600;
+      font-size: 1.8rem;
+      letter-spacing: 1px;
+    }
+
+    .main-container {
+      display: flex;
+      flex-wrap: wrap;
+      margin: 20px;
+      gap: 20px;
+    }
+
+    .map-container {
+      flex: 2;
+      min-width: 300px;
+      background: white;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      padding: 20px;
+    }
+
+    .info-panel {
+      flex: 1;
+      min-width: 280px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      padding: 20px;
+      display: none;
+    }
+
+    #map {
+      height: 550px;
+      width: 100%;
+      border-radius: 8px;
+      margin-top: 15px;
+    }
+
+    .form-group label {
+      font-weight: 600;
+    }
+
+    .btn-primary {
+      background: #01017f;
+      border: none;
+    }
+
+    .btn-primary:hover {
+      background: #005f56;
+    }
+
+    .bird-image {
+      width: 100%;
+      max-width: 400px;
+      height: auto;
+      border-radius: 8px;
+      margin-top: 15px;
+      display: block;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    .migration-reason {
+      margin-top: 20px;
+      font-size: 1rem;
+      color: #555;
+    }
+
+    .overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(255,255,255,0.9);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .blurred {
+      filter: blur(4px);
+      pointer-events: none;
+      user-select: none;
+    }
+
+    .overlay img {
+      width: 120px;
+      height: 120px;
+      margin-bottom: 20px;
+      position: absolute;
+      top: 40%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .quote {
+      font-family: 'Playfair Display', serif;
+      font-size: 1.1rem;
+      color: #000756;
+      max-width: 500px;
+      opacity: 1;
+      transition: opacity 1s ease-in-out;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      font-style: italic;
+      letter-spacing: 0.05em;
+      text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+      line-height: 1.4;
+    }
+
+    /* Legend Box */
+    .legend {
+      background: white;
+      padding: 10px;
+      line-height: 1.5em;
+      border-radius: 5px;
+      box-shadow: 0 0 15px rgba(0,0,0,0.1);
+      font-size: 0.9rem;
+    }
+
+    .legend div {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-color {
+      width: 20px;
+      height: 4px;
+      border-radius: 2px;
+      margin-right: 8px;
+    }
+
+    .legend-actual { background-color: red; }
+    .legend-predicted { background-color: blue; border-bottom: 2px dashed blue; height: 2px; }
+    .legend-future { background-color: green; border-bottom: 2px dashed green; height: 2px; }
+  </style>
+</head>
+
+<body>
+  <div class="overlay" id="overlay">
+    <img src="assets/birdload.gif" alt="Loading Bird">
+    <div class="quote" id="loadingQuote">Birds fly not because they can, but because they must.</div>
+  </div>
+
+  <div class="header">🐦 Bird Migration Prediction</div>
+
+  <div class="main-container" id="mainContent">
+    <div class="map-container">
+      <div class="form-group">
+        <label for="birdId">Enter Bird ID:</label>
+        <input type="text" id="birdId" class="form-control" placeholder="e.g., BIRD123">
+      </div>
+      <button id="generateMapBtn" class="btn btn-primary mb-3">Generate Map</button>
+      <div id="map"></div>
+    </div>
+
+    <div class="info-panel">
+      <h4>Migration Insights</h4>
+      <img src="https://plus.unsplash.com/premium_photo-1661945245687-8f23c0ce15ba?w=500&auto=format&fit=crop&q=60&ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8b3NwcmV5fGVufDB8fDB8fHww"
+           alt="Bird Image" class="bird-image" id="birdImage">
+      <div class="migration-reason" id="migrationReason">
+        Birds migrate primarily to find optimal breeding grounds and favorable climates. They travel long distances to ensure food availability and safe nesting sites, often triggered by changing seasons.
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const quotes = [
+      "Birds fly not because they can, but because they must.",
+      "Migration is nature's promise of return.",
+      "Feathers carry dreams across continents.",
+      "A bird's path is written in the sky.",
+      "Wings know no borders.",
+      "To migrate is to hope for better skies."
+    ];
+
+    let quoteIndex = 0;
+    let quoteInterval;
+
+    function startQuoteCycle() {
+      quoteInterval = setInterval(() => {
+        quoteIndex = (quoteIndex + 1) % quotes.length;
+        $('#loadingQuote').fadeOut(1000, function () {
+          $(this).text(quotes[quoteIndex]).fadeIn(1000);
+        });
+      }, 3000);
+    }
+
+    function showOverlay() {
+      $('#overlay').fadeIn();
+      $('#mainContent').addClass('blurred');
+      $('.info-panel').hide();
+      startQuoteCycle();
+    }
+
+    function hideOverlay() {
+      $('#overlay').fadeOut();
+      $('#mainContent').removeClass('blurred');
+      clearInterval(quoteInterval);
+      $('.info-panel').fadeIn();
+    }
+
+    var map;
+    var actualLine, predictedLine, futureLine;
+
+    $(document).ready(function () {
+      $('#generateMapBtn').click(function () {
+        const birdId = $('#birdId').val().trim();
+        if (!birdId) {
+          alert('Please enter a valid Bird ID.');
+          return;
+        }
+
+        showOverlay();
+
+        $.ajax({
+          url: 'http://127.0.0.1:5000/generate_map',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify({ bird_id: birdId }),
+          success: function (data) {
+            displayMap(data);
+            updateBirdInfo(birdId);
+            hideOverlay();
+          },
+          error: function () {
+            alert('Failed to load migration data.');
+            hideOverlay();
+          }
+        });
+      });
+
+      function displayMap(data) {
+        if (!map) {
+          map = L.map('map').setView([20, 77], 5);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+          }).addTo(map);
+        } else {
+          map.eachLayer(layer => {
+            if (layer instanceof L.Polyline || layer instanceof L.Marker) map.removeLayer(layer);
+          });
+        }
+
+        const actualCoords = data.actual.map(p => [p.lat, p.lon]);
+        const predictedCoords = data.predicted.map(p => [p.lat, p.lon]);
+        const futureCoords = data.future.map(p => [p.lat, p.lon]);
+
+        // Plot actual points with timestamps
+data.actual.forEach(p => {
+  L.circleMarker([p.lat, p.lon], { color: 'red' })
+    .addTo(map)
+    .bindPopup(`Actual<br><strong>${p.timestamp}</strong>`);
+});
+actualLine = L.polyline(data.actual.map(p => [p.lat, p.lon]), { color: 'red' }).addTo(map);
+
+// Plot predicted points with timestamps
+data.predicted.forEach(p => {
+  L.circleMarker([p.lat, p.lon], { color: 'blue' })
+    .addTo(map)
+    .bindPopup(`Predicted<br><strong>${p.timestamp}</strong>`);
+});
+predictedLine = L.polyline(data.predicted.map(p => [p.lat, p.lon]), { color: 'blue', dashArray: '5,10' }).addTo(map);
+
+// Plot future points with timestamps
+data.future.forEach(p => {
+  L.circleMarker([p.lat, p.lon], { color: 'green' })
+    .addTo(map)
+    .bindPopup(`Future<br><strong>${p.timestamp}</strong>`);
+});
+futureLine = L.polyline(data.future.map(p => [p.lat, p.lon]), { color: 'green', dashArray: '5,5' }).addTo(map);
+
+        predictedLine = L.polyline(predictedCoords, { color: 'blue', dashArray: '5,10' }).addTo(map).bindPopup('Predicted Path');
+        futureLine = L.polyline(futureCoords, { color: 'green', dashArray: '5,5' }).addTo(map).bindPopup('Future Path');
+
+        if (actualCoords.length) {
+          L.marker(actualCoords[0]).addTo(map).bindPopup('Start').openPopup();
+        }
+
+        map.fitBounds(L.featureGroup([actualLine, predictedLine, futureLine]).getBounds());
+
+        // Add Legend
+        addLegend();
+      }
+
+      function addLegend() {
+        const existing = document.querySelector('.legend');
+        if (existing) existing.remove();
+
+        const legend = L.control({ position: 'bottomright' });
+
+        legend.onAdd = function () {
+          const div = L.DomUtil.create('div', 'legend');
+          div.innerHTML += `
+            <div><span class="legend-color legend-actual"></span> Actual Path</div>
+            <div><span class="legend-color legend-predicted"></span> Predicted Path</div>
+            <div><span class="legend-color legend-future"></span> Future Path</div>
+          `;
+          return div;
+        };
+
+        legend.addTo(map);
+      }
+
+      function updateBirdInfo(birdId) {
+        $('#migrationReason').text(
+          `Bird ID: ${birdId} migrates primarily to find optimal breeding grounds and favorable climates.`
+        );
+      }
+    });
+  </script>
+</body>
+</html>
