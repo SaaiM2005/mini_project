@@ -3,11 +3,11 @@
 An intelligent system that predicts and visualizes the migratory patterns of birds using LSTM-based neural networks, currently focused on the Osprey species. Built with a modular architecture and interactive web interface, this tool aims to support ecological research, conservation planning, and behavioral studies.
 
 ## 📸 Screenshots
-![Screenshot 1](/frontend/screenshots/image1.png)  
-![Screenshot 2](/frontend/screenshots/image2.png)  
-![Screenshot 3](/frontend/screenshots/image3.png)  
-![Screenshot 4](/frontend/screenshots/image4.png)  
-![Screenshot 5](/frontend/screenshots/image5.png)  
+![Screenshot 1](image1.png)  
+![Screenshot 2](image2.png)  
+![Screenshot 3](image3.png)  
+![Screenshot 4](image4.png)  
+![Screenshot 5](image5.png)  
 
 ## 🚀 Project Status
 
